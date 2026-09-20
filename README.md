@@ -17,32 +17,49 @@ Miu is a lightweight, frameless, transparent desktop companion built natively in
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Installation & Cross-Distro Support
 
-### Installation
+Miu runs on **any modern Linux distribution** with GNOME, KDE, XFCE, Cinnamon, Sway, or Hyprland (via XWayland).
 
-Ensure system dependencies are installed:
+### 1. One-Line Installation
 
-#### Fedora / RHEL
+Clone the repository and run the included installer:
+
+```bash
+git clone https://github.com/VaibhavaKG/Miu.git ~/.local/share/miu-app
+~/.local/share/miu-app/install.sh
+```
+
+> **What `install.sh` does:**
+> - Automatically symlinks `miu` and `hi` to `~/.local/bin` so you can launch it anywhere.
+> - Registers `miu.desktop` in your application launcher menu.
+> - Detects your package manager and advises on any missing dependencies.
+
+---
+
+### 2. System Dependencies
+
+Miu relies on standard Linux desktop libraries (PyGObject, GTK 3, and Cairo). Install them using your distribution's package manager:
+
+#### 🔵 Fedora / RHEL / CentOS
 ```bash
 sudo dnf install python3-gobject gtk3 cairo libappindicator-gtk3 libwnck3
 ```
 
-#### Ubuntu / Debian
+#### 🟣 Ubuntu / Debian / Linux Mint / Pop!_OS
 ```bash
 sudo apt update
 sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-appindicator3-0.1 gir1.2-wnck-3.0
 ```
 
-#### Arch Linux
+#### 🏹 Arch Linux / Manjaro / EndeavourOS
 ```bash
-sudo pacman -S python-gobject gtk3 cairo libappindicator-gtk3 libwnck3
+sudo pacman -S --needed python-gobject gtk3 cairo libappindicator-gtk3 libwnck3
 ```
 
-Clone and run directly:
+#### 🦎 openSUSE
 ```bash
-git clone https://github.com/yourusername/Miu.git ~/.local/share/miu-app
-~/.local/share/miu-app/bin/miu
+sudo zypper install python3-gobject typelib-1_0-Gtk-3_0 typelib-1_0-AppIndicator3-0_1 typelib-1_0-Wnck-3_0
 ```
 
 ---

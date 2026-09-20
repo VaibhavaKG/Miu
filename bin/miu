@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Miu Desktop Companion — Application Launcher
+# ==============================================================================
+
+set -e
+
+# Resolve the absolute path of the directory containing this script
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PACKAGE_DIR="$(cd "${SELF_DIR}/.." && pwd -P)"
+
+export MIU_PACKAGE_DIR="${PACKAGE_DIR}"
+export PYTHONPATH="${PACKAGE_DIR}/app${PYTHONPATH:+:${PYTHONPATH}}"
+
+# X11 backend ensures transparent click-through window positioning on Wayland/Xwayland
+if [ -z "${GDK_BACKEND}" ]; then
+    export GDK_BACKEND="x11"
+fi
+
+exec /usr/bin/python3 "${PACKAGE_DIR}/app/miu_cli.py" "$@"

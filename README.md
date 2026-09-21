@@ -1,132 +1,152 @@
-# Miu 2.0 🐾
+# Miu 2.0
 
-> A tiny, futuristic, playful desktop companion that happens to live on your Linux screen.
+A small desktop companion for Linux.
 
-Miu is a lightweight, frameless, transparent desktop companion built natively in Python, GTK 3, and Cairo. Originally inspired by the classic Oneko, Miu has evolved into a complete, modern companion ecosystem: autonomous ambient life, celestial interactive control center, optional Pomodoro focus sessions, strict one-line literary drops, and zero-distraction desktop awareness.
+Miu is a lightweight, frameless desktop cat built with Python, GTK 3, and Cairo. It quietly lives on your desktop, walks around, rests in corners, plays with things, and occasionally gets distracted.
 
----
-
-## ✦ What Makes Miu Special?
-
-* **Desktop Companion First**: By default, Miu is just Miu — trotting around, napping in cozy window corners, batting yarn balls, and keeping quiet company. No permanent ticking countdowns.
-* **Miu Home Console (`miu --home`)**: An astronomical observatory dashboard featuring dynamic telemetry, live viewport habitat, Spotify / MPRIS Now Playing integration, and character customization.
-* **Autonomous Living World**: Miu discovers tiny desktop objects (leaves, coins, scraps), plays with yarn balls with real physics, sits in cardboard boxes, and respects your cursor by gently evading your work.
-* **Optional Pomodoro Engine (`miu --pomodoro`)**: When you need deep focus, activate dedicated 45-minute focus cycles with short/long breaks and isolated 60-second celebratory overlays.
-* **Curated Literary Drops**: 106 verified one-line public-domain literary moments delivered with elegance during breaks or on demand.
-* **Zero Bloat & Zero Telemetry**: Native GTK3 and Cairo rendering. No Electron, no browser runtimes, no tracking. All data is saved strictly to your local XDG user directories.
+You can simply run Miu and leave it alone, or open **Miu Home** for a more complete interface.
 
 ---
 
-## 🚀 Installation & Cross-Distro Support
+## Why Miu?
 
-Miu runs on **any modern Linux distribution** with GNOME, KDE, XFCE, Cinnamon, Sway, or Hyprland (via XWayland).
+I recently happened to develop a minor interest in cats.
 
-### 1. One-Line Installation
+It seemed like a fun idea to have one around on my desktop, without having to deal with the actual cat part of owning a cat. So I started with **Oneko**, a small free desktop cat project, and gradually began changing it.
 
-Clone the repository and run the included installer:
+Over the following days, I kept adding things. Better behaviour, objects to interact with, a little home, music, focus sessions, customisation, and eventually a proper interface around it.
 
-```bash
-git clone https://github.com/VaibhavaKG/Miu.git ~/.local/share/miu-app
-~/.local/share/miu-app/install.sh
-```
+I named it **Miu**.
 
-> **What `install.sh` does:**
-> - Automatically symlinks `miu` and `hi` to `~/.local/bin` so you can launch it anywhere.
-> - Registers `miu.desktop` in your application launcher menu.
-> - Detects your package manager and advises on any missing dependencies.
+The funny part is that I still hate cats.
+
+Especially the fact that they shed their fur absolutely everywhere.
+
+So this is probably the ideal arrangement: I get a cat that walks around, plays with things, and keeps me company while I work, without leaving fur on my clothes.
 
 ---
 
-### 2. System Dependencies
+## What Miu Does
 
-Miu relies on standard Linux desktop libraries (PyGObject, GTK 3, and Cairo). Install them using your distribution's package manager:
+### Desktop Companion
 
-#### 🔵 Fedora / RHEL / CentOS
 ```bash
-sudo dnf install python3-gobject gtk3 cairo libappindicator-gtk3 libwnck3
+miu
 ```
 
-#### 🟣 Ubuntu / Debian / Linux Mint / Pop!_OS
-```bash
-sudo apt update
-sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-appindicator3-0.1 gir1.2-wnck-3.0
-```
+Miu stays quietly on the desktop and can:
 
-#### 🏹 Arch Linux / Manjaro / EndeavourOS
-```bash
-sudo pacman -S --needed python-gobject gtk3 cairo libappindicator-gtk3 libwnck3
-```
+* Walk around windows
+* Sleep and idle
+* Play with small objects such as yarn
+* Avoid the cursor while you work
+* Be summoned to your cursor
 
-#### 🦎 openSUSE
-```bash
-sudo zypper install python3-gobject typelib-1_0-Gtk-3_0 typelib-1_0-AppIndicator3-0_1 typelib-1_0-Wnck-3_0
-```
-
----
-
-## 🕹 Command-Line Interface (`miu` / `hi miu`)
-
-Miu accepts both `miu` and `hi miu` command styles:
-
-| Command | Action |
-| :--- | :--- |
-| `miu` or `hi miu` | Start / wake Miu desktop companion |
-| `miu --home` | Open the Miu Home futuristic control console |
-| `miu --pomodoro` | Start / toggle optional Pomodoro focus mode |
-| `miu --focus` | Immediately start a 45-minute deep focus session |
-| `miu --pause` | Pause the active focus timer |
-| `miu --resume` | Resume the active focus timer |
-| `miu --reset` | Reset timer to idle state |
-| `miu --break` | Start a 5-minute break |
-| `miu --literary` | Deliver a single-line literary quote |
-| `miu --customize` | Open pet character customizer |
-| `miu --stats` | View focus and reading telemetry |
-| `miu summon` | Summon Miu to your cursor / workspace (`Ctrl+M`) |
-| `miu --stop` | Cleanly rest and close Miu |
-
----
-
-## 🛰 Miu Home Observatory
-
-Launch the interactive control console at any time:
+### Miu Home
 
 ```bash
 miu --home
 ```
 
-Inside Miu Home:
-* **Habitat**: Watch Miu live inside the celestial viewport, toss a yarn ball, or track what song is currently playing on Spotify.
-* **Appearance**: Switch between 8 coat themes (Classic, Ginger, Midnight Black, Sakura, Calico, etc.), hats, glasses, and eye expressions.
-* **Focus Hub**: Dedicated focus controls and status readouts.
-* **Library**: Browse the full library of classic literature lines and saved favorites.
-* **Telemetry**: View daily session counts, total focused hours, and activity logs.
+Miu Home is the main interface for the project.
 
----
+It includes Miu's habitat, appearance customisation, currently playing music, focus controls, and a small activity view.
 
-## 📁 System Data (XDG Compliant)
+The design takes inspiration from astronomical observatories, but keeps the interface deliberately minimal.
 
-Miu strictly isolates static package code from user state:
-
-* **Configuration**: `~/.config/miu/config.json`
-* **Custom Overlays**: `~/.local/share/miu/accessories/`
-* **Media Cache**: `~/.cache/miu/album_art/`
-* **Logs**: `~/.local/share/miu/miu.log`
-* **IPC Socket**: `$XDG_RUNTIME_DIR/miu.sock`
-
----
-
-## 🧪 Testing
-
-Miu includes a comprehensive test suite covering all engines, IPC, Cairo rendering, and desktop lifecycle:
+### Focus Mode
 
 ```bash
-GDK_BACKEND=x11 python3 -m unittest discover -s tests -v
+miu --focus
+```
+
+Miu can also act as a simple focus companion with 45-minute sessions and breaks.
+
+It stays completely optional. Normal Miu does not show a timer or productivity overlay.
+
+### Music
+
+Miu Home can display the currently playing track through Linux MPRIS-compatible players such as Spotify.
+
+---
+
+## Commands
+
+| Command           | Action                   |
+| ----------------- | ------------------------ |
+| `miu`             | Start Miu                |
+| `miu --home`      | Open Miu Home            |
+| `miu --focus`     | Start a focus session    |
+| `miu --pause`     | Pause the session        |
+| `miu --resume`    | Resume the session       |
+| `miu --reset`     | Reset the session        |
+| `miu --stop`      | Stop Miu                 |
+| `miu summon`      | Summon Miu to the cursor |
+| `miu --customize` | Open customisation       |
+
+`Ctrl + M` can also be used to summon Miu.
+
+---
+
+## Installation
+
+Clone the repository:
+
+```bash
+git clone https://github.com/VaibhavaKG/Miu.git ~/.local/share/miu-app
+```
+
+Run the installer:
+
+```bash
+~/.local/share/miu-app/install.sh
+```
+
+The installer sets up the `miu` command and adds Miu to the application menu.
+
+### Dependencies
+
+#### Fedora
+
+```bash
+sudo dnf install python3-gobject gtk3 cairo libappindicator-gtk3 libwnck3
+```
+
+#### Ubuntu / Debian
+
+```bash
+sudo apt update
+sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-appindicator3-0.1 gir1.2-wnck-3.0
+```
+
+#### Arch
+
+```bash
+sudo pacman -S --needed python-gobject gtk3 cairo libappindicator-gtk3 libwnck3
 ```
 
 ---
 
-## 📜 Attribution & License
+## Built With
 
-Initially based on Oneko. Evolved, redesigned, and packaged by Vaibhava.
+* Python
+* GTK 3
+* PyGObject
+* Cairo
+* Linux MPRIS
 
-Released under the **MIT License**.
+Miu is a native Linux application with no Electron or browser runtime.
+
+There is no telemetry. User configuration, logs, accessories, and cached data remain on the local machine using standard XDG directories.
+
+---
+
+## Credits
+
+Miu started with **Oneko**, a free desktop cat project, and has since been heavily customised and expanded.
+
+Developed by **Vaibhava**.
+
+## License
+
+MIT

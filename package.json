@@ -1,0 +1,46 @@
+{
+  "name": "miu",
+  "version": "1.0.0",
+  "description": "Miu — a tiny pixel cat with a Pomodoro timer, for Linux.",
+  "main": "main.js",
+  "bin": {
+    "miu": "./cli.js"
+  },
+  "scripts": {
+    "start": "electron --ozone-platform=x11 .",
+    "build": "electron-builder --linux AppImage rpm deb"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "dev.miu.app",
+    "productName": "Miu",
+    "linux": {
+      "target": ["AppImage", "rpm", "deb"],
+      "category": "Utility",
+      "icon": "assets/icon.png",
+      "desktop": {
+        "Name": "Miu",
+        "Comment": "Pixel cat Pomodoro timer",
+        "StartupWMClass": "miu"
+      }
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "cli.js",
+      "renderer/**/*",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "cli.js",
+        "to": "cli.js"
+      }
+    ]
+  }
+}

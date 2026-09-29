@@ -1,0 +1,520 @@
+#!/usr/bin/env python3
+"""miu-daemon — Miu pixel cat desktop overlay with Pomodoro timer.
+Uses GTK 3, Cairo, and GdkPixbuf. No external dependencies beyond
+what ships with GNOME."""
+
+import os
+os.environ.setdefault("GDK_BACKEND", "x11")  # XWayland for Wayland sessions
+
+import gi
+gi.require_version("Gtk", "3.0")
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
+import cairo
+import sys
+import json
+import math
+import random
+import socket
+import signal
+import threading
+import subprocess
+
+CAT_NAME = "Miu"
+SPRITE_SIZE = 32
+CAT_SPEED = 10
+
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+SPRITE_PATH = os.path.join(SCRIPT_DIR, "assets", "miu.gif")
+CONFIG_DIR = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "miu")
+CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
+SOCKET_PATH = os.path.join(
+    os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "miu.sock")
+
+# Sprite grid positions (col, row). Sheet pixel = (-col*32, -row*32).
+SPRITE_SETS = {
+    "idle":         [(-3, -3)],
+    "alert":        [(-7, -3)],
+    "scratchSelf":  [(-5, 0), (-6, 0), (-7, 0)],
+    "scratchWallN": [(0, 0), (0, -1)],
+    "scratchWallS": [(-7, -1), (-6, -2)],
+    "scratchWallE": [(-2, -2), (-2, -3)],
+    "scratchWallW": [(-4, 0), (-4, -1)],
+    "tired":        [(-3, -2)],
+    "sleeping":     [(-2, 0), (-2, -1)],
+    "N":  [(-1, -2), (-1, -3)],
+    "NE": [(0, -2), (0, -3)],
+    "E":  [(-3, 0), (-3, -1)],
+    "SE": [(-5, -1), (-5, -2)],
+    "S":  [(-6, -3), (-7, -2)],
+    "SW": [(-5, -3), (-6, -1)],
+    "W":  [(-4, -2), (-4, -3)],
+    "NW": [(-1, 0), (-1, -1)],
+}
+
+
+class MiuApp:
+    def __init__(self):
+        self.config = self._load_config()
+        self.spritesheet = GdkPixbuf.Pixbuf.new_from_file(SPRITE_PATH)
+        self.sheet_w = self.spritesheet.get_width()
+        self.sheet_h = self.spritesheet.get_height()
+
+        # Cat state
+        self.cat_visible = False
+        self.cat_x = 200.0
+        self.cat_y = 200.0
+        self.mouse_x = 0.0
+        self.mouse_y = 0.0
+        self.frame_count = 0
+        self.idle_time = 0
+        self.idle_animation = None
+        self.idle_anim_frame = 0
+        self.sprite_col = -3
+        self.sprite_row = -3
+
+        # Bubble
+        self.bubble_text = None
+        self.bubble_timeout_id = None
+
+        # Timer
+        self.timer_running = False
+        self.timer_paused = False
+        self.timer_type = None
+        self.timer_remaining = 0
+        self.timer_tick_id = None
+
+        # Screen geometry
+        display = Gdk.Display.get_default()
+        monitor = display.get_primary_monitor() or display.get_monitor(0)
+        geom = monitor.get_geometry()
+        self.scr_x = geom.x
+        self.scr_y = geom.y
+        self.scr_w = geom.width
+        self.scr_h = geom.height
+
+        self._setup_window()
+        GLib.timeout_add(50, self._poll_cursor)
+        GLib.timeout_add(100, self._animation_tick)
+        self._start_socket_server()
+
+    # ── Config ────────────────────────────────────────────────
+    def _load_config(self):
+        try:
+            with open(CONFIG_PATH) as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {"focusMinutes": 50, "breakMinutes": 10}
+
+    def _save_config(self):
+        try:
+            os.makedirs(CONFIG_DIR, exist_ok=True)
+            with open(CONFIG_PATH, "w") as f:
+                json.dump(self.config, f, indent=2)
+        except OSError:
+            pass
+
+    # ── Window ────────────────────────────────────────────────
+    def _setup_window(self):
+        self.window = Gtk.Window()
+        self.window.set_title(CAT_NAME)
+        self.window.set_decorated(False)
+        self.window.set_skip_taskbar_hint(True)
+        self.window.set_skip_pager_hint(True)
+        self.window.set_keep_above(True)
+        self.window.set_accept_focus(False)
+        self.window.set_app_paintable(True)
+        self.window.set_type_hint(Gdk.WindowTypeHint.DOCK)
+
+        screen = self.window.get_screen()
+        visual = screen.get_rgba_visual()
+        if visual:
+            self.window.set_visual(visual)
+
+        self.window.set_default_size(self.scr_w, self.scr_h)
+        self.window.move(self.scr_x, self.scr_y)
+
+        self.window.connect("draw", self._on_draw)
+        self.window.connect("realize", self._on_realize)
+        self.window.connect("destroy", lambda _: self._quit())
+        self.window.show_all()
+
+    def _on_realize(self, widget):
+        gdk_win = widget.get_window()
+        if gdk_win:
+            gdk_win.input_shape_combine_region(cairo.Region(), 0, 0)
+
+    # ── Cursor ────────────────────────────────────────────────
+    def _poll_cursor(self):
+        try:
+            seat = Gdk.Display.get_default().get_default_seat()
+            _, x, y = seat.get_pointer().get_position()
+            self.mouse_x = float(x)
+            self.mouse_y = float(y)
+        except Exception:
+            pass
+        return True
+
+    # ── Sprites (logic unchanged from original) ──────────────
+    def _set_sprite(self, name, frame):
+        sprites = SPRITE_SETS[name]
+        self.sprite_col, self.sprite_row = sprites[frame % len(sprites)]
+
+    def _reset_idle(self):
+        self.idle_animation = None
+        self.idle_anim_frame = 0
+
+    def _idle(self):
+        self.idle_time += 1
+        if (self.idle_time > 10
+                and random.randint(0, 199) == 0
+                and self.idle_animation is None):
+            avail = ["sleeping", "scratchSelf"]
+            if self.cat_x < self.scr_x + 32:
+                avail.append("scratchWallW")
+            if self.cat_y < self.scr_y + 32:
+                avail.append("scratchWallN")
+            if self.cat_x > self.scr_x + self.scr_w - 32:
+                avail.append("scratchWallE")
+            if self.cat_y > self.scr_y + self.scr_h - 32:
+                avail.append("scratchWallS")
+            self.idle_animation = random.choice(avail)
+
+        a = self.idle_animation
+        af = self.idle_anim_frame
+        if a == "sleeping":
+            if af < 8:
+                self._set_sprite("tired", 0)
+            else:
+                self._set_sprite("sleeping", af // 4)
+                if af > 192:
+                    self._reset_idle()
+        elif a in ("scratchWallN", "scratchWallS", "scratchWallE",
+                    "scratchWallW", "scratchSelf"):
+            self._set_sprite(a, af)
+            if af > 9:
+                self._reset_idle()
+        else:
+            self._set_sprite("idle", 0)
+            return
+        self.idle_anim_frame += 1
+
+    def _frame(self):
+        self.frame_count += 1
+        dx = self.cat_x - self.mouse_x
+        dy = self.cat_y - self.mouse_y
+        dist = math.sqrt(dx * dx + dy * dy)
+
+        if dist < CAT_SPEED or dist < 48:
+            self._idle()
+            return
+
+        self.idle_animation = None
+        self.idle_anim_frame = 0
+
+        if self.idle_time > 1:
+            self._set_sprite("alert", 0)
+            self.idle_time = min(self.idle_time, 7)
+            self.idle_time -= 1
+            return
+
+        d = ""
+        d += "N" if dy / dist > 0.5 else ""
+        d += "S" if dy / dist < -0.5 else ""
+        d += "W" if dx / dist > 0.5 else ""
+        d += "E" if dx / dist < -0.5 else ""
+        if d:
+            self._set_sprite(d, self.frame_count)
+
+        self.cat_x -= (dx / dist) * CAT_SPEED
+        self.cat_y -= (dy / dist) * CAT_SPEED
+        self.cat_x = max(self.scr_x + 16, min(self.cat_x, self.scr_x + self.scr_w - 16))
+        self.cat_y = max(self.scr_y + 16, min(self.cat_y, self.scr_y + self.scr_h - 16))
+
+    def _animation_tick(self):
+        if self.cat_visible:
+            self._frame()
+            self.window.queue_draw()
+        return True
+
+    # ── Drawing ───────────────────────────────────────────────
+    def _on_draw(self, _widget, cr):
+        cr.set_source_rgba(0, 0, 0, 0)
+        cr.set_operator(cairo.OPERATOR_SOURCE)
+        cr.paint()
+        cr.set_operator(cairo.OPERATOR_OVER)
+
+        if not self.cat_visible:
+            return
+
+        # Cat sprite
+        sx = max(0, min(int(-self.sprite_col * SPRITE_SIZE), self.sheet_w - SPRITE_SIZE))
+        sy = max(0, min(int(-self.sprite_row * SPRITE_SIZE), self.sheet_h - SPRITE_SIZE))
+        sub = self.spritesheet.new_subpixbuf(sx, sy, SPRITE_SIZE, SPRITE_SIZE)
+        Gdk.cairo_set_source_pixbuf(cr, sub,
+                                    self.cat_x - 16 - self.scr_x,
+                                    self.cat_y - 16 - self.scr_y)
+        cr.paint()
+
+        # Bubble
+        if self.bubble_text:
+            self._draw_bubble(cr)
+
+    def _draw_bubble(self, cr):
+        text = self.bubble_text
+        cr.select_font_face("monospace", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+        cr.set_font_size(11)
+        ext = cr.text_extents(text)
+
+        pad = 6
+        bw = ext.width + pad * 2
+        bh = ext.height + pad * 2
+        bx = (self.cat_x - self.scr_x) - bw / 2
+        by = (self.cat_y - self.scr_y) - 16 - bh - 10
+        bx = max(2, min(bx, self.scr_w - bw - 2))
+        by = max(2, by)
+
+        # Rounded rect + pointer triangle
+        r = 5
+        cr.new_path()
+        cr.arc(bx + r, by + r, r, math.pi, 1.5 * math.pi)
+        cr.arc(bx + bw - r, by + r, r, 1.5 * math.pi, 0)
+        cr.arc(bx + bw - r, by + bh - r, r, 0, 0.5 * math.pi)
+        cr.arc(bx + r, by + bh - r, r, 0.5 * math.pi, math.pi)
+        cr.close_path()
+        tri_x = max(bx + 8, min(self.cat_x - self.scr_x, bx + bw - 8))
+        cr.move_to(tri_x - 4, by + bh)
+        cr.line_to(tri_x, by + bh + 5)
+        cr.line_to(tri_x + 4, by + bh)
+        cr.close_path()
+
+        cr.set_source_rgba(1, 1, 1, 0.95)
+        cr.fill_preserve()
+        cr.set_source_rgba(0.53, 0.53, 0.53, 0.8)
+        cr.set_line_width(1)
+        cr.stroke()
+
+        cr.set_source_rgba(0.2, 0.2, 0.2, 1)
+        cr.move_to(bx + pad, by + pad + ext.height)
+        cr.show_text(text)
+
+    # ── Bubble helpers ────────────────────────────────────────
+    def _show_bubble(self, text, ms=0):
+        self.bubble_text = text
+        if self.bubble_timeout_id:
+            GLib.source_remove(self.bubble_timeout_id)
+            self.bubble_timeout_id = None
+        if ms > 0:
+            self.bubble_timeout_id = GLib.timeout_add(ms, self._hide_bubble)
+        self.window.queue_draw()
+
+    def _hide_bubble(self):
+        self.bubble_text = None
+        self.bubble_timeout_id = None
+        self.window.queue_draw()
+        return False
+
+    # ── Timer ─────────────────────────────────────────────────
+    def _start_timer(self, ttype, minutes):
+        self._stop_timer()
+        self.timer_running = True
+        self.timer_paused = False
+        self.timer_type = ttype
+        self.timer_remaining = minutes * 60
+
+        key = "focusMinutes" if ttype == "focus" else "breakMinutes"
+        self.config[key] = minutes
+        self._save_config()
+
+        if not self.cat_visible:
+            self.cat_visible = True
+        self._update_timer_bubble()
+        self.timer_tick_id = GLib.timeout_add(1000, self._timer_tick)
+
+    def _timer_tick(self):
+        if self.timer_paused:
+            return True
+        self.timer_remaining -= 1
+        if self.timer_remaining <= 0:
+            self._timer_end()
+            return False
+        if self.cat_visible:
+            self._update_timer_bubble()
+        return True
+
+    def _update_timer_bubble(self):
+        m, s = divmod(self.timer_remaining, 60)
+        self._show_bubble(f"{m:02d}:{s:02d}")
+
+    def _timer_end(self):
+        ttype = self.timer_type
+        self.timer_running = False
+        self.timer_paused = False
+        self.timer_tick_id = None
+        if not self.cat_visible:
+            self.cat_visible = True
+        self._show_bubble("Time's up! 🐾", 8000)
+        # Quick wake-up animation
+        self._set_sprite("alert", 0)
+        GLib.timeout_add(300, lambda: (self._set_sprite("scratchSelf", 0), False)[1])
+        GLib.timeout_add(500, lambda: (self._set_sprite("scratchSelf", 1), False)[1])
+        GLib.timeout_add(700, lambda: (self._set_sprite("scratchSelf", 2), False)[1])
+        GLib.timeout_add(1000, lambda: (self._set_sprite("idle", 0), False)[1])
+        try:
+            subprocess.Popen(["notify-send", "--app-name", CAT_NAME,
+                              f"{CAT_NAME}: Time's up! 🐾",
+                              "Focus done." if ttype == "focus" else "Break over!"])
+        except FileNotFoundError:
+            pass
+
+    def _stop_timer(self):
+        if self.timer_tick_id:
+            GLib.source_remove(self.timer_tick_id)
+            self.timer_tick_id = None
+        self.timer_running = False
+        self.timer_paused = False
+        self.timer_type = None
+        self.timer_remaining = 0
+        self._hide_bubble()
+
+    def _get_status(self):
+        if not self.timer_running:
+            return None
+        m, s = divmod(self.timer_remaining, 60)
+        return {"type": self.timer_type, "remaining": f"{m:02d}:{s:02d}",
+                "paused": self.timer_paused}
+
+    # ── Commands ──────────────────────────────────────────────
+    def handle_command(self, cmd):
+        parts = cmd.strip().split()
+        if not parts:
+            return {"ok": False, "msg": "Empty command"}
+
+        a, b = parts[0].lower(), (parts[1].lower() if len(parts) > 1 else "")
+        arg = parts[2] if len(parts) > 2 else (parts[1] if len(parts) > 1 else None)
+
+        # "hi miu" / "bye miu"
+        if a == "hi" and b == "miu":
+            return self._cmd_hi()
+        if a == "bye" and b == "miu":
+            return self._cmd_bye()
+
+        # "miu <cmd> [arg]" → normalise
+        if a == "miu":
+            a = b
+            arg = parts[2] if len(parts) > 2 else None
+
+        if a == "hi":
+            return self._cmd_hi()
+        if a == "bye":
+            return self._cmd_bye()
+        if a == "--focus":
+            mins = int(arg) if arg and arg.isdigit() else self.config.get("focusMinutes", 50)
+            GLib.idle_add(self._start_timer, "focus", mins)
+            return {"ok": True, "msg": f"Focus: {mins} min"}
+        if a == "--break":
+            mins = int(arg) if arg and arg.isdigit() else self.config.get("breakMinutes", 10)
+            GLib.idle_add(self._start_timer, "break", mins)
+            return {"ok": True, "msg": f"Break: {mins} min"}
+        if a == "--pause":
+            self.timer_paused = True
+            return {"ok": True, "msg": "Paused."}
+        if a == "--resume":
+            self.timer_paused = False
+            return {"ok": True, "msg": "Resumed."}
+        if a == "--stop":
+            GLib.idle_add(self._stop_timer)
+            return {"ok": True, "msg": "Stopped."}
+        if a == "--status":
+            st = self._get_status()
+            if not st:
+                return {"ok": True, "msg": "No timer running."}
+            lbl = " (paused)" if st["paused"] else ""
+            GLib.idle_add(self._show_bubble, st["remaining"], 3000)
+            return {"ok": True, "msg": f"{st['type']}: {st['remaining']}{lbl}"}
+        if a == "quit":
+            GLib.idle_add(self._quit)
+            return {"ok": True, "msg": "Bye."}
+
+        return {"ok": False, "msg": f"Unknown: {cmd.strip()}"}
+
+    def _cmd_hi(self):
+        GLib.idle_add(self._do_hi)
+        return {"ok": True, "msg": f"{CAT_NAME} says: mew!"}
+
+    def _do_hi(self):
+        self.cat_visible = True
+        self._show_bubble("mew!", 2000)
+        return False
+
+    def _cmd_bye(self):
+        GLib.idle_add(self._do_bye)
+        return {"ok": True, "msg": f"{CAT_NAME} hides."}
+
+    def _do_bye(self):
+        self.cat_visible = False
+        if not self.timer_running:
+            self._hide_bubble()
+        self.window.queue_draw()
+        return False
+
+    # ── Socket server ─────────────────────────────────────────
+    def _start_socket_server(self):
+        try:
+            os.unlink(SOCKET_PATH)
+        except FileNotFoundError:
+            pass
+        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._sock.bind(SOCKET_PATH)
+        os.chmod(SOCKET_PATH, 0o600)
+        self._sock.listen(5)
+        t = threading.Thread(target=self._socket_loop, daemon=True)
+        t.start()
+
+    def _socket_loop(self):
+        while True:
+            try:
+                conn, _ = self._sock.accept()
+                data = conn.recv(4096).decode().strip()
+                for line in data.split("\n"):
+                    line = line.strip()
+                    if line:
+                        res = self.handle_command(line)
+                        conn.sendall((json.dumps(res) + "\n").encode())
+                conn.close()
+            except Exception:
+                if self._sock.fileno() == -1:
+                    break
+
+    # ── Lifecycle ─────────────────────────────────────────────
+    def _quit(self):
+        try:
+            os.unlink(SOCKET_PATH)
+        except FileNotFoundError:
+            pass
+        Gtk.main_quit()
+        return False
+
+    def run(self):
+        signal.signal(signal.SIGTERM, lambda *_: GLib.idle_add(self._quit))
+        signal.signal(signal.SIGINT, lambda *_: GLib.idle_add(self._quit))
+        Gtk.main()
+
+
+def main():
+    # Refuse to run if another instance is already up
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.connect(SOCKET_PATH)
+        s.close()
+        print(f"{CAT_NAME} is already running.", file=sys.stderr)
+        sys.exit(1)
+    except (ConnectionRefusedError, FileNotFoundError):
+        pass
+
+    MiuApp().run()
+
+
+if __name__ == "__main__":
+    main()

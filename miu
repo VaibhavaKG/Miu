@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""miu — CLI for the Miu pixel cat. Talks to miu-daemon via Unix socket."""
+
+import socket
+import os
+import sys
+import json
+import time
+import subprocess
+
+CAT_NAME = "Miu"
+SOCKET_PATH = os.path.join(
+    os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "miu.sock")
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+DAEMON_PATH = os.path.join(SCRIPT_DIR, "miu-daemon")
+
+
+def send_command(cmd, retries=3):
+    for attempt in range(retries):
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.connect(SOCKET_PATH)
+            s.sendall((cmd + "\n").encode())
+            s.shutdown(socket.SHUT_WR)
+            resp = b""
+            while True:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                resp += chunk
+            s.close()
+            for line in resp.decode().strip().split("\n"):
+                if not line:
+                    continue
+                try:
+                    print(json.loads(line).get("msg", line))
+                except json.JSONDecodeError:
+                    print(line)
+            return
+        except (ConnectionRefusedError, FileNotFoundError):
+            if attempt == 0:
+                print(f"{CAT_NAME} is not running. Starting...")
+                start_daemon()
+            time.sleep(1.5)
+    print(f"Could not connect to {CAT_NAME}.", file=sys.stderr)
+    sys.exit(1)
+
+
+def start_daemon():
+    env = os.environ.copy()
+    env["GDK_BACKEND"] = "x11"
+    try:
+        subprocess.Popen(
+            [sys.executable, DAEMON_PATH],
+            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True)
+    except Exception as e:
+        print(f"Failed to start: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        print(f"Usage: miu <command>")
+        print("  hi              Show {0}".format(CAT_NAME))
+        print("  bye             Hide {0}".format(CAT_NAME))
+        print("  --focus [N]     Focus timer (default 50 min)")
+        print("  --break [N]     Break timer (default 10 min)")
+        print("  --pause         Pause timer")
+        print("  --resume        Resume timer")
+        print("  --stop          Cancel timer")
+        print("  --status        Show remaining time")
+        print("  quit            Exit app")
+        sys.exit(0)
+    send_command(" ".join(args))
+
+
+if __name__ == "__main__":
+    main()
